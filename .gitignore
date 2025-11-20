@@ -16,3 +16,10 @@ doc/source/_auto_examples
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Pipeline workspace directories
+pipeline_workspace/
+**/operators/
+**/envs/
+**/workspace/
+**/cache/

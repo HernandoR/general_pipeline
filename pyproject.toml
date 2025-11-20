@@ -1,9 +1,20 @@
 [project]
 authors = [{name = "liuzhen19", email = "liuzhen19@xiaomi.com"}]
-dependencies = []
+dependencies = [
+    "omegaconf>=2.3.0",
+    "loguru>=0.7.2",
+    "pydantic>=2.0.0",
+    "psutil>=5.9.8",
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+]
 name = "general_pipeline"
 requires-python = ">= 3.11"
 version = "0.1.0"
+
+[project.scripts]
+pipeline-cli = "general_pipeline.cli:cli"
+pipeline-validate = "general_pipeline.cli:validate_cmd"
 
 [build-system]
 build-backend = "hatchling.build"
