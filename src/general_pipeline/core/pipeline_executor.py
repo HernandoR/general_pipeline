@@ -1,17 +1,17 @@
 """产线执行器"""
-import subprocess
 import os
+import signal
+import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
-import signal
+from typing import Dict
 
-from general_pipeline.models.pipeline_config import PipelineConfig
+from general_pipeline.core.resource_monitor import ResourceMonitor
 from general_pipeline.models.operator_config import OperatorConfig
+from general_pipeline.models.pipeline_config import PipelineConfig
+from general_pipeline.utils.exceptions import DependencyMissingError
 from general_pipeline.utils.log_utils import get_logger, setup_logger
 from general_pipeline.utils.path_utils import ensure_dir_exists
-from general_pipeline.utils.exceptions import DependencyMissingError
-from general_pipeline.core.resource_monitor import ResourceMonitor
 
 logger = get_logger()
 
@@ -125,15 +125,15 @@ class PipelineExecutor:
         env_config.env_root_path = env_root_path
         
         # 注入算子代码路径
-        if hasattr(env_config, 'operator_code_path'):
+        if hasattr(env_config, "operator_code_path"):
             env_config.operator_code_path = operator.code_path
         
         # 注入S3客户端（如果是Conda环境）
-        if hasattr(env_config, 's3_client') and self.config.s3_config:
+        if hasattr(env_config, "s3_client") and self.config.s3_config:
             try:
                 import boto3
                 s3_client = boto3.client(
-                    's3',
+                    "s3",
                     endpoint_url=self.config.s3_config.endpoint,
                     aws_access_key_id=self.config.s3_config.access_key,
                     aws_secret_access_key=self.config.s3_config.secret_key,

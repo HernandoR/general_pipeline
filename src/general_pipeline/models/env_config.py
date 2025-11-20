@@ -1,14 +1,15 @@
 """虚拟环境配置模型"""
-from pydantic import BaseModel, Field, field_validator
+import os
+import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-import subprocess
-import os
+from typing import Any, Dict, List, Optional
 
-from general_pipeline.utils.path_utils import ensure_dir_exists
-from general_pipeline.utils.log_utils import get_logger
+from pydantic import BaseModel, Field, field_validator
+
 from general_pipeline.utils.exceptions import EnvInstallError
+from general_pipeline.utils.log_utils import get_logger
+from general_pipeline.utils.path_utils import ensure_dir_exists
 from general_pipeline.utils.s3_utils import parse_s3_path
 
 logger = get_logger()
@@ -205,7 +206,7 @@ class CondaVirtualEnvConfig(BaseVirtualEnvConfig):
                 Filename=str(temp_compress_path)
             )
         except Exception as e:
-            raise EnvInstallError(f"S3下载conda压缩包失败：{str(e)}")
+            raise EnvInstallError(f"S3下载conda压缩包失败：{str(e)}") from e
 
         # 2. zstd解压压缩包到目标环境路径
         decompress_cmd = [

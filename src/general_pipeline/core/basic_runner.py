@@ -1,6 +1,5 @@
 """算子基类 BasicRunner"""
 import os
-from pathlib import Path
 from abc import ABC, abstractmethod
 
 from general_pipeline.utils.log_utils import get_logger

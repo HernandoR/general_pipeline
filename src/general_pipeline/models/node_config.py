@@ -1,6 +1,7 @@
 """节点配置模型"""
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class NodeResourceConfig(BaseModel):

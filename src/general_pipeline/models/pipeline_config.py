@@ -1,10 +1,11 @@
 """产线配置模型"""
-from pydantic import BaseModel, Field, field_validator
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Optional
 
-from general_pipeline.models.operator_config import OperatorConfig
+from pydantic import BaseModel, Field, field_validator
+
 from general_pipeline.models.node_config import NodeConfig
+from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.utils.codec import Base64Codec
 
 

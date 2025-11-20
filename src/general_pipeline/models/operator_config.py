@@ -1,12 +1,13 @@
 """算子配置模型"""
-from pydantic import BaseModel, Field, field_validator
 from pathlib import Path
-from typing import List, Dict, Optional, Union
+from typing import Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field, field_validator
 
 from general_pipeline.models.env_config import (
-    UVVirtualEnvConfig,
+    CondaVirtualEnvConfig,
     PixiVirtualEnvConfig,
-    CondaVirtualEnvConfig
+    UVVirtualEnvConfig,
 )
 from general_pipeline.utils.codec import Base64Codec
 

@@ -1,6 +1,6 @@
 """S3 工具模块"""
-from typing import Dict
 import re
+from typing import Dict
 
 
 def parse_s3_path(s3_path: str) -> Dict[str, str]:
