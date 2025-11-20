@@ -1,24 +1,23 @@
 [project]
-name = "awesome_project"
+authors = [{name = "liuzhen19", email = "liuzhen19@xiaomi.com"}]
+dependencies = []
+name = "general_pipeline"
+requires-python = ">= 3.11"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "HernandoR", email = "lzhen.dev@outlook.com" }
-]
-requires-python = ">=3.10"
-dependencies = [
-    "rootutils>=1.0.7",
-]
-
-[project.scripts]
-awesome_project = "awesome_project:main"
 
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-options]
+index-url = "https://pkgs.d.xiaomi.net/artifactory/api/pypi/pypi-virtual/simple"
 
 
-[[tool.uv.index]]
-url = "https://mirrors.cernet.edu.cn/pypi/web/simple"
-default = true
+[tool.pixi.pypi-dependencies]
+general_pipeline = { path = ".", editable = true }
+
+[tool.pixi.tasks]
