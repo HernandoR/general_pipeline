@@ -9,6 +9,7 @@ dependencies = [
     "pyyaml>=6.0",
     "GitPython>=3.1.0",
     "rootutils>=1.0.0",
+    "python-dotenv>=1.0.0",
 ]
 name = "general_pipeline"
 requires-python = ">= 3.11"

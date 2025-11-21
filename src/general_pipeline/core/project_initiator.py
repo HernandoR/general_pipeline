@@ -9,7 +9,6 @@ from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.models.pipeline_config import PipelineConfig
 from general_pipeline.utils.exceptions import DependencyMissingError
 from general_pipeline.utils.log_utils import get_logger
-from general_pipeline.utils.s3_utils import get_or_create_s3_client
 
 logger = get_logger()
 
@@ -111,25 +110,8 @@ class ProjectInitiator:
         if hasattr(env_config, "operator_code_path"):
             env_config.operator_code_path = operator.code_path
         
-        # 如果有S3配置，注册S3客户端（不直接注入到env_config）
-        if self.config.s3_config:
-            # 注册所有可能的S3客户端
-            # Conda环境会通过s3_utils自动查找
-            if hasattr(env_config, "s3_compress_path"):
-                try:
-                    s3_path_info = env_config.s3_compress_path.replace("s3://", "").split("/", 1)
-                    bucket_name = s3_path_info[0] if s3_path_info else "default"
-                    
-                    get_or_create_s3_client(
-                        bucket_name=bucket_name,
-                        endpoint=self.config.s3_config.endpoint,
-                        access_key=self.config.s3_config.access_key,
-                        secret_key=self.config.s3_config.secret_key,
-                        region=self.config.s3_config.region
-                    )
-                except Exception as e:
-                    logger.warning(f"S3客户端注册失败: {e}")
-
+        # S3凭证通过环境变量管理（s3_aksk.env），s3_utils会自动加载
+        # 不再需要在这里注册S3客户端
         
         # 安装环境
         env_full_path = env_config.get_full_env_path()

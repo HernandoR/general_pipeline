@@ -74,6 +74,10 @@ class HierarchicalConfigLoader:
         with open(node_file, "r", encoding="utf-8") as f:
             config = toml.load(f)
         
+        # 如果配置有嵌套结构（例如 [node_1]），提取内容
+        if node_id in config:
+            return config[node_id]
+        
         return config
     
     def load_operator_config(self, operator_id: str, version: str) -> Dict[str, Any]:
@@ -96,6 +100,10 @@ class HierarchicalConfigLoader:
         with open(operator_file, "r", encoding="utf-8") as f:
             config = toml.load(f)
         
+        # 如果配置有嵌套结构（例如 [example_operator_1]），提取内容
+        if operator_id in config:
+            return config[operator_id]
+        
         return config
     
     def load_and_integrate(self, pipeline_file: Path) -> Dict[str, Any]:
@@ -105,45 +113,71 @@ class HierarchicalConfigLoader:
         :return: 集成后的完整配置
         """
         # 1. 加载主产线配置
-        pipeline_config = self.load_pipeline_config(pipeline_file)
+        raw_config = self.load_pipeline_config(pipeline_file)
+        
+        # 如果配置有嵌套结构（例如 [pipeline]），提取内容
+        if "pipeline" in raw_config:
+            pipeline_config = raw_config["pipeline"]
+        else:
+            pipeline_config = raw_config
         
         # 2. 加载并集成节点配置
         integrated_nodes = []
+        nodes_refs = []
+        
+        # 处理不同的节点引用格式
         if "nodes" in pipeline_config:
-            for node_ref in pipeline_config["nodes"]:
-                # node_ref 可以是字符串 "node_id:version" 或字典
-                if isinstance(node_ref, str):
-                    parts = node_ref.split(":")
-                    node_id = parts[0]
-                    version = parts[1] if len(parts) > 1 else "v1.0"
-                elif isinstance(node_ref, dict):
-                    node_id = node_ref.get("node_id")
-                    version = node_ref.get("version", "v1.0")
-                else:
-                    raise ValueError(f"不支持的节点引用格式: {node_ref}")
-                
-                node_config = self.load_node_config(node_id, version)
-                integrated_nodes.append(node_config)
+            if isinstance(pipeline_config["nodes"], dict) and "refs" in pipeline_config["nodes"]:
+                # 新格式: [pipeline.nodes] refs = [...]
+                nodes_refs = pipeline_config["nodes"]["refs"]
+            elif isinstance(pipeline_config["nodes"], list):
+                # 旧格式: nodes = [...]
+                nodes_refs = pipeline_config["nodes"]
+        
+        for node_ref in nodes_refs:
+            # node_ref 可以是字符串 "node_id:version" 或字典
+            if isinstance(node_ref, str):
+                parts = node_ref.split(":")
+                node_id = parts[0]
+                version = parts[1] if len(parts) > 1 else "v1.0"
+            elif isinstance(node_ref, dict):
+                node_id = node_ref.get("node_id")
+                version = node_ref.get("version", "v1.0")
+            else:
+                raise ValueError(f"不支持的节点引用格式: {node_ref}")
+            
+            node_config = self.load_node_config(node_id, version)
+            integrated_nodes.append(node_config)
         
         pipeline_config["nodes"] = integrated_nodes
         
         # 3. 加载并集成算子配置
         integrated_operators = []
+        operators_refs = []
+        
+        # 处理不同的算子引用格式
         if "operators" in pipeline_config:
-            for op_ref in pipeline_config["operators"]:
-                # op_ref 可以是字符串 "operator_id:version" 或字典
-                if isinstance(op_ref, str):
-                    parts = op_ref.split(":")
-                    operator_id = parts[0]
-                    version = parts[1] if len(parts) > 1 else "v1.0"
-                elif isinstance(op_ref, dict):
-                    operator_id = op_ref.get("operator_id")
-                    version = op_ref.get("version", "v1.0")
-                else:
-                    raise ValueError(f"不支持的算子引用格式: {op_ref}")
-                
-                operator_config = self.load_operator_config(operator_id, version)
-                integrated_operators.append(operator_config)
+            if isinstance(pipeline_config["operators"], dict) and "refs" in pipeline_config["operators"]:
+                # 新格式: [pipeline.operators] refs = [...]
+                operators_refs = pipeline_config["operators"]["refs"]
+            elif isinstance(pipeline_config["operators"], list):
+                # 旧格式: operators = [...]
+                operators_refs = pipeline_config["operators"]
+        
+        for op_ref in operators_refs:
+            # op_ref 可以是字符串 "operator_id:version" 或字典
+            if isinstance(op_ref, str):
+                parts = op_ref.split(":")
+                operator_id = parts[0]
+                version = parts[1] if len(parts) > 1 else "v1.0"
+            elif isinstance(op_ref, dict):
+                operator_id = op_ref.get("operator_id")
+                version = op_ref.get("version", "v1.0")
+            else:
+                raise ValueError(f"不支持的算子引用格式: {op_ref}")
+            
+            operator_config = self.load_operator_config(operator_id, version)
+            integrated_operators.append(operator_config)
         
         pipeline_config["operators"] = integrated_operators
         

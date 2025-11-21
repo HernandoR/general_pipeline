@@ -2,10 +2,13 @@
 import os
 from typing import Dict, Optional
 
+import toml
+
 from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.models.pipeline_config import PipelineConfig
 from general_pipeline.utils.log_utils import get_logger, setup_logger
 from general_pipeline.utils.path_utils import ensure_dir_exists
+from general_pipeline.utils.s3_utils import download_from_s3
 from general_pipeline.utils.subprocess_utils import run_cmd_stream
 
 logger = get_logger()
@@ -14,13 +17,18 @@ logger = get_logger()
 class PipelineExecutor:
     """产线执行器，负责调度和执行产线（不包含初始化）"""
 
-    def __init__(self, config: PipelineConfig):
+    def __init__(self, config: PipelineConfig, config_prefix: str = "PIPELINE"):
         """
         初始化产线执行器
         :param config: 产线配置
+        :param config_prefix: 环境变量前缀（用于配置覆盖）
         """
         self.config = config
+        self.config_prefix = config_prefix
         self.operator_map: Dict[str, OperatorConfig] = {}
+        
+        # 应用配置覆盖
+        self._apply_config_override()
         
         # 初始化日志
         self._setup_logging()
@@ -34,6 +42,32 @@ class PipelineExecutor:
         # 构建算子映射
         for operator in config.operators:
             self.operator_map[operator.operator_id] = operator
+
+    def _apply_config_override(self) -> None:
+        """从环境变量读取配置覆盖（支持S3路径）"""
+        override_path_var = f"{self.config_prefix}_CONFIG_OVERRIDE_S3_PATH"
+        override_s3_path = os.getenv(override_path_var)
+        
+        if override_s3_path:
+            try:
+                logger.info(f"从S3加载配置覆盖：{override_s3_path}")
+                # 下载配置文件到内存
+                buffer = download_from_s3(override_s3_path)
+                override_config = toml.loads(buffer.read().decode("utf-8"))
+                
+                # 应用覆盖（简单的字典合并）
+                self._merge_config(self.config.model_dump(), override_config)
+                logger.info("配置覆盖应用成功")
+            except Exception as e:
+                logger.warning(f"应用配置覆盖失败: {e}")
+    
+    def _merge_config(self, base: dict, override: dict) -> None:
+        """递归合并配置"""
+        for key, value in override.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                self._merge_config(base[key], value)
+            else:
+                base[key] = value
 
     def _setup_logging(self) -> None:
         """设置日志"""
@@ -86,7 +120,7 @@ class PipelineExecutor:
         
         logger.info(f"工作目录初始化完成：{self.config.work_dir}")
 
-    def execute_operator(self, operator: OperatorConfig, node_id: str) -> int:
+    def run_op(self, operator: OperatorConfig, node_id: str) -> int:
         """
         执行单个算子
         :param operator: 算子配置
@@ -103,7 +137,10 @@ class PipelineExecutor:
         # 准备环境变量
         env_vars = os.environ.copy()
         env_vars.update(operator.env_config.activate_env())
-        env_vars.update(operator.extra_env_vars)
+        
+        # 注入 extra_env_vars（来自operator配置）
+        if hasattr(operator, "extra_env_vars") and operator.extra_env_vars:
+            env_vars.update(operator.extra_env_vars)
         
         # 添加标准环境变量
         env_vars.update({
@@ -134,6 +171,44 @@ class PipelineExecutor:
         
         logger.info(f"算子执行完成：{operator.operator_id}，exit_code={exit_code}")
         return exit_code
+
+    def run_node(self, node_id: str) -> int:
+        """
+        执行单个节点（包含该节点的所有算子）
+        :param node_id: 节点ID
+        :return: exit_code
+        """
+        # 查找节点
+        node = None
+        for n in self.config.nodes:
+            if n.node_id == node_id:
+                node = n
+                break
+        
+        if not node:
+            logger.error(f"节点 {node_id} 不存在")
+            return 1
+        
+        logger.info(f"开始执行节点：{node_id}")
+        
+        # 执行节点中的所有算子
+        for operator_id in node.operator_ids:
+            operator = self.operator_map.get(operator_id)
+            if not operator:
+                logger.error(f"节点 {node_id} 中的算子 {operator_id} 不存在")
+                return 1
+            
+            if not operator.code_path:
+                logger.error(f"算子 {operator_id} 代码路径未设置，请先运行项目初始化")
+                return 1
+            
+            exit_code = self.run_op(operator, node_id)
+            if exit_code != 0:
+                logger.error(f"算子执行失败，终止节点，exit_code={exit_code}")
+                return exit_code
+        
+        logger.info(f"节点执行完成：{node_id}")
+        return 0
 
     def run(self, target_node: Optional[str] = None, target_operator: Optional[str] = None) -> int:
         """
@@ -169,39 +244,21 @@ class PipelineExecutor:
                     logger.warning(f"未找到算子 {target_operator} 所属的节点，使用默认节点ID")
                     node_id = "default_node"
                 
-                exit_code = self.execute_operator(operator, node_id)
+                exit_code = self.run_op(operator, node_id)
                 logger.info(f"算子执行完成：exit_code={exit_code}")
                 return exit_code
             
-            # 过滤要执行的节点
-            nodes_to_run = self.config.nodes
+            # 如果指定了目标节点，执行该节点
             if target_node:
                 logger.info(f"执行单个节点模式：{target_node}")
-                nodes_to_run = [n for n in self.config.nodes if n.node_id == target_node]
-                if not nodes_to_run:
-                    logger.error(f"节点 {target_node} 不存在")
-                    return 1
+                return self.run_node(target_node)
             
-            # 按节点执行算子
-            for node in nodes_to_run:
-                logger.info(f"开始执行节点：{node.node_id}")
-                
-                for operator_id in node.operator_ids:
-                    operator = self.operator_map.get(operator_id)
-                    if not operator:
-                        logger.error(f"节点 {node.node_id} 中的算子 {operator_id} 不存在")
-                        return 1
-                    
-                    if not operator.code_path:
-                        logger.error(f"算子 {operator_id} 代码路径未设置，请先运行项目初始化")
-                        return 1
-                    
-                    exit_code = self.execute_operator(operator, node.node_id)
-                    if exit_code != 0:
-                        logger.error(f"算子执行失败，终止产线，exit_code={exit_code}")
-                        return exit_code
-                
-                logger.info(f"节点执行完成：{node.node_id}")
+            # 执行所有节点
+            for node in self.config.nodes:
+                exit_code = self.run_node(node.node_id)
+                if exit_code != 0:
+                    logger.error(f"节点执行失败，终止产线，exit_code={exit_code}")
+                    return exit_code
             
             logger.info("产线执行完成")
             return 0

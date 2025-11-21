@@ -1,9 +1,10 @@
 # 节点配置：node_1 版本 v1.0
+[node_1]
 node_id = "node_1"
 operator_ids = ["example_operator_1"]
 runner_count = 1
 
-[resource]
+[node_1.resource]
 cpu_request = 2.0
 cpu_limit = 4.0
 memory_request = 8.0
