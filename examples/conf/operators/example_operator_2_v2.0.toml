@@ -1,0 +1,17 @@
+# 算子配置：example_operator_2 版本 v2.0
+[example_operator_2]
+operator_id = "example_operator_2"
+git_repo = "https://github.com/example/operator2.git"
+git_tag = "v2.1.0"
+upstream_dependencies = ["example_operator_1"]  # 依赖operator_1
+start_command = "python process.py"
+timeout = 3600  # 60分钟超时
+
+[example_operator_2.extra_env_vars]
+BATCH_SIZE = "100"
+
+# Pixi虚拟环境配置
+[example_operator_2.env_config]
+env_name = "example_env_2"
+pixi_toml_path = "pixi.toml"
+pixi_channels = ["conda-forge"]

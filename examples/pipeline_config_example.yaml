@@ -1,0 +1,71 @@
+# 数据处理产线示例配置
+pipeline_id: "example_pipeline_v1"
+name: "示例数据处理产线"
+description: "演示基本的数据处理流程"
+work_dir: "./pipeline_workspace"
+
+# 日志配置
+log_config:
+  level: "INFO"
+  rotation: "10 GB"
+  retention: 30
+
+# S3配置（可选，用于Conda环境下载）
+# s3_config:
+#   endpoint: "http://s3.example.com"
+#   access_key: "base64://QUtJQUVYQU1QTEU="  # 使用Base64编码保护敏感信息
+#   secret_key: "base64://c2VjcmV0X2tleV9leGFtcGxl"
+#   region: "us-east-1"
+
+# 算子配置
+operators:
+  - operator_id: "example_operator_1"
+    git_repo: "https://github.com/example/operator1.git"
+    git_tag: "v1.0.0"
+    upstream_dependencies: []  # 无上游依赖
+    start_command: "python main.py"
+    timeout: 1800  # 30分钟超时
+    extra_env_vars:
+      INPUT_PATH: "/data/input"
+      OUTPUT_PATH: "/data/output"
+    # UV虚拟环境配置
+    env_config:
+      env_name: "example_env_1"
+      pyproject_path: "pyproject.toml"
+      uv_extra_args: []
+
+  - operator_id: "example_operator_2"
+    git_repo: "https://github.com/example/operator2.git"
+    git_tag: "v2.1.0"
+    upstream_dependencies: ["example_operator_1"]  # 依赖operator_1
+    start_command: "python process.py"
+    timeout: 3600  # 60分钟超时
+    extra_env_vars:
+      BATCH_SIZE: "100"
+    # Pixi虚拟环境配置
+    env_config:
+      env_name: "example_env_2"
+      pixi_toml_path: "pixi.toml"
+      pixi_channels: ["conda-forge"]
+
+# 节点配置
+nodes:
+  - node_id: "node_1"
+    operator_ids: ["example_operator_1"]
+    runner_count: 1
+    resource:
+      cpu_request: 2.0
+      cpu_limit: 4.0
+      memory_request: 8.0
+      memory_limit: 16.0
+      gpu_request: 0
+
+  - node_id: "node_2"
+    operator_ids: ["example_operator_2"]
+    runner_count: 1
+    resource:
+      cpu_request: 4.0
+      cpu_limit: 8.0
+      memory_request: 16.0
+      memory_limit: 32.0
+      gpu_request: 0
