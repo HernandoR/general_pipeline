@@ -10,21 +10,36 @@ logger = get_logger()
 
 
 class ResourceMonitor:
-    """资源监控器，监控进程的CPU、内存、磁盘IO、网络IO"""
+    """资源监控器，监控进程的CPU、内存、磁盘IO、网络IO、GPU（可选）"""
 
-    def __init__(self, pid: int, monitor_interval: int = 5):
+    def __init__(self, pid: int, monitor_interval: int = 5, monitor_gpu: bool = False):
         """
         初始化资源监控器
         :param pid: 要监控的进程ID
         :param monitor_interval: 监控间隔（秒）
+        :param monitor_gpu: 是否监控GPU
         """
         self.pid = pid
         self.monitor_interval = monitor_interval
+        self.monitor_gpu = monitor_gpu
         self.process: Optional[psutil.Process] = None
+        self.gpu_available = False
+        
         try:
             self.process = psutil.Process(pid)
         except psutil.NoSuchProcess:
             logger.error(f"进程 {pid} 不存在，无法监控")
+        
+        # 检查GPU监控是否可用
+        if self.monitor_gpu:
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                self.gpu_available = True
+                logger.info("GPU监控已启用")
+            except (ImportError, Exception) as e:
+                logger.warning(f"GPU监控不可用: {e}")
+                self.gpu_available = False
 
     def get_resource_usage(self) -> Dict[str, float]:
         """
@@ -70,10 +85,35 @@ class ResourceMonitor:
                 "disk_read_mb_s": round(disk_read_mb_s, 2),
                 "disk_write_mb_s": round(disk_write_mb_s, 2),
                 "net_sent_mb_s": round(net_sent_mb_s, 2),
-                "net_recv_mb_s": round(net_recv_mb_s, 2)
+                "net_recv_mb_s": round(net_recv_mb_s, 2),
+                **self._get_gpu_usage()
             }
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
             logger.warning(f"获取进程 {self.pid} 资源使用失败: {e}")
+            return {}
+
+    def _get_gpu_usage(self) -> Dict[str, float]:
+        """获取GPU使用情况"""
+        if not self.gpu_available:
+            return {}
+        
+        try:
+            import pynvml
+            device_count = pynvml.nvmlDeviceGetCount()
+            gpu_usage = {}
+            
+            for i in range(device_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                
+                gpu_usage[f"gpu_{i}_util"] = util.gpu
+                gpu_usage[f"gpu_{i}_mem_used_mb"] = round(mem_info.used / (1024 * 1024), 2)
+                gpu_usage[f"gpu_{i}_mem_total_mb"] = round(mem_info.total / (1024 * 1024), 2)
+            
+            return gpu_usage
+        except Exception as e:
+            logger.warning(f"获取GPU使用失败: {e}")
             return {}
 
     def log_resource_usage(self, pipeline_id: str, node_id: str, operator_id: str) -> None:

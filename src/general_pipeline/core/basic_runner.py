@@ -13,45 +13,49 @@ class BasicRunner(ABC):
     所有算子必须继承此类并实现 run() 方法
     """
 
-    def __init__(self, pipeline_id: str, node_id: str, operator_id: str, work_dir: str):
+    def __init__(
+        self,
+        pipeline_id: str,
+        node_id: str,
+        operator_id: str,
+        input_root: str,
+        output_root: str,
+        workspace_root: str,
+    ):
         """
         初始化算子
         :param pipeline_id: 产线ID
         :param node_id: 节点ID
         :param operator_id: 算子ID
-        :param work_dir: 产线根工作目录
+        :param input_root: 输入根路径（由Pipeline传入）
+        :param output_root: 输出根路径（由Pipeline传入）
+        :param workspace_root: 工作空间根路径（由Pipeline传入）
         """
         self.pipeline_id = pipeline_id
         self.node_id = node_id
         self.operator_id = operator_id
-        self.work_dir = work_dir
+        self.input_root = input_root
+        self.output_root = output_root
+        self.workspace_root = workspace_root
         self._init_paths()
 
     def _init_paths(self) -> None:
-        """自动创建所有基础路径（绝对路径）"""
-        # 输入根路径：上游算子输出数据源
-        self.input_root = os.path.join(self.work_dir, "input", self.operator_id)
-        # 产线输出根路径：算子最终输出（全局可见）
-        self.pipeline_output_root = os.path.join(
-            self.work_dir, "output", self.pipeline_id, self.node_id, self.operator_id
-        )
-        # 产线工作空间：算子临时文件目录
-        self.pipeline_workspace = os.path.join(
-            self.work_dir, "workspace", self.pipeline_id, self.node_id, self.operator_id
-        )
-        # 缓存根路径：可复用数据（如模型权重）
-        self.cache_root = os.path.join(self.work_dir, "cache", self.operator_id)
+        """检查路径存在性并创建输出路径"""
+        # 检查输入路径是否存在
+        if not os.path.exists(self.input_root):
+            logger.warning(f"输入路径不存在：{self.input_root}")
 
-        # 批量创建目录（避免路径不存在报错）
-        for path in [self.input_root, self.pipeline_output_root,
-                     self.pipeline_workspace, self.cache_root]:
-            os.makedirs(path, exist_ok=True)
+        # 检查工作空间根路径是否存在
+        if not os.path.exists(self.workspace_root):
+            logger.warning(f"工作空间根路径不存在：{self.workspace_root}")
+
+        # 只创建输出路径（workspace/{runner_output_name}）
+        os.makedirs(self.output_root, exist_ok=True)
 
         logger.debug(f"算子 {self.operator_id} 路径初始化完成")
         logger.debug(f"  输入路径: {self.input_root}")
-        logger.debug(f"  输出路径: {self.pipeline_output_root}")
-        logger.debug(f"  工作空间: {self.pipeline_workspace}")
-        logger.debug(f"  缓存路径: {self.cache_root}")
+        logger.debug(f"  输出路径: {self.output_root}")
+        logger.debug(f"  工作空间: {self.workspace_root}")
 
     @abstractmethod
     def run(self) -> int:

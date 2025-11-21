@@ -7,6 +7,8 @@ dependencies = [
     "psutil>=5.9.8",
     "click>=8.0.0",
     "pyyaml>=6.0",
+    "GitPython>=3.1.0",
+    "rootutils>=1.0.0",
 ]
 name = "general_pipeline"
 requires-python = ">= 3.11"

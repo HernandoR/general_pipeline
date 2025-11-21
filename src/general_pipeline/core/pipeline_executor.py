@@ -1,23 +1,18 @@
 """产线执行器"""
 import os
-import signal
-import subprocess
-import time
-from pathlib import Path
 from typing import Dict
 
-from general_pipeline.core.resource_monitor import ResourceMonitor
 from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.models.pipeline_config import PipelineConfig
-from general_pipeline.utils.exceptions import DependencyMissingError
 from general_pipeline.utils.log_utils import get_logger, setup_logger
 from general_pipeline.utils.path_utils import ensure_dir_exists
+from general_pipeline.utils.subprocess_utils import run_cmd_stream
 
 logger = get_logger()
 
 
 class PipelineExecutor:
-    """产线执行器，负责初始化、调度和执行产线"""
+    """产线执行器，负责调度和执行产线（不包含初始化）"""
 
     def __init__(self, config: PipelineConfig):
         """
@@ -26,10 +21,12 @@ class PipelineExecutor:
         """
         self.config = config
         self.operator_map: Dict[str, OperatorConfig] = {}
-        self.env_cache: Dict[str, Path] = {}  # 环境缓存：env_key -> env_path
         
         # 初始化日志
         self._setup_logging()
+        
+        # 记录配置信息
+        self._log_config()
         
         # 初始化工作目录
         self._init_workspace()
@@ -43,6 +40,7 @@ class PipelineExecutor:
         if self.config.log_config:
             log_path = self.config.log_config.log_path
             if not log_path:
+                import time
                 timestamp = time.strftime("%Y%m%d%H%M%S")
                 log_path = self.config.work_dir / "logs" / f"pipeline_{self.config.pipeline_id}_{timestamp}.log"
             
@@ -54,105 +52,39 @@ class PipelineExecutor:
             )
         logger.info(f"产线初始化开始：{self.config.pipeline_id}")
 
+    def _log_config(self) -> None:
+        """记录配置信息"""
+        logger.info("=" * 60)
+        logger.info("产线配置信息:")
+        logger.info(f"  Pipeline ID: {self.config.pipeline_id}")
+        logger.info(f"  Pipeline Name: {self.config.name}")
+        logger.info(f"  Description: {self.config.description or 'N/A'}")
+        logger.info(f"  Work Dir: {self.config.work_dir}")
+        logger.info(f"  Operators Count: {len(self.config.operators)}")
+        logger.info(f"  Nodes Count: {len(self.config.nodes)}")
+        
+        for idx, operator in enumerate(self.config.operators, 1):
+            logger.info(f"  Operator {idx}: {operator.operator_id}")
+            logger.info(f"    - Git Repo: {operator.git_repo}")
+            logger.info(f"    - Git Tag: {operator.git_tag}")
+            logger.info(f"    - Dependencies: {operator.upstream_dependencies or 'None'}")
+        
+        for idx, node in enumerate(self.config.nodes, 1):
+            logger.info(f"  Node {idx}: {node.node_id}")
+            logger.info(f"    - Operators: {node.operator_ids}")
+            logger.info(f"    - Runner Count: {node.runner_count}")
+        
+        logger.info("=" * 60)
+
     def _init_workspace(self) -> None:
         """初始化工作目录"""
         ensure_dir_exists(self.config.work_dir)
         
         # 创建标准目录结构
-        for subdir in ["operators", "envs", "logs", "input", "output", "workspace", "cache"]:
+        for subdir in ["logs", "input", "output", "workspace"]:
             ensure_dir_exists(self.config.work_dir / subdir)
         
         logger.info(f"工作目录初始化完成：{self.config.work_dir}")
-
-    def validate_dependencies(self) -> None:
-        """验证算子依赖关系"""
-        logger.info("开始验证算子依赖关系")
-        
-        for operator in self.config.operators:
-            for dep_id in operator.upstream_dependencies:
-                if dep_id not in self.operator_map:
-                    raise DependencyMissingError(
-                        f"算子 {operator.operator_id} 依赖的算子 {dep_id} 不存在"
-                    )
-        
-        logger.info("算子依赖关系验证通过")
-
-    def clone_operator_code(self, operator: OperatorConfig) -> Path:
-        """
-        克隆算子代码
-        :param operator: 算子配置
-        :return: 代码路径
-        """
-        code_path = self.config.work_dir / "operators" / operator.operator_id
-        
-        if code_path.exists():
-            logger.info(f"算子代码已存在，跳过克隆：{code_path}")
-            return code_path
-        
-        logger.info(f"开始克隆算子代码：{operator.git_repo} (tag: {operator.git_tag})")
-        
-        try:
-            # 克隆代码
-            subprocess.run(
-                ["git", "clone", "--branch", operator.git_tag, "--depth", "1", 
-                 operator.git_repo, str(code_path)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            logger.info(f"算子代码克隆完成：{code_path}")
-            return code_path
-        except subprocess.CalledProcessError as e:
-            logger.error(f"算子代码克隆失败：{e.stderr}")
-            raise
-
-    def setup_virtual_env(self, operator: OperatorConfig) -> None:
-        """
-        设置虚拟环境
-        :param operator: 算子配置
-        """
-        env_config = operator.env_config
-        env_type = type(env_config).__name__
-        env_key = f"{env_type}_{env_config.env_name}"
-        
-        # 检查环境缓存
-        if env_key in self.env_cache:
-            logger.info(f"复用已存在的虚拟环境：{env_key}")
-            return
-        
-        # 设置环境根路径
-        env_root_path = self.config.work_dir / "envs"
-        env_config.env_root_path = env_root_path
-        
-        # 注入算子代码路径
-        if hasattr(env_config, "operator_code_path"):
-            env_config.operator_code_path = operator.code_path
-        
-        # 注入S3客户端（如果是Conda环境）
-        if hasattr(env_config, "s3_client") and self.config.s3_config:
-            try:
-                import boto3
-                s3_client = boto3.client(
-                    "s3",
-                    endpoint_url=self.config.s3_config.endpoint,
-                    aws_access_key_id=self.config.s3_config.access_key,
-                    aws_secret_access_key=self.config.s3_config.secret_key,
-                    region_name=self.config.s3_config.region
-                )
-                env_config.s3_client = s3_client
-            except ImportError:
-                logger.warning("boto3未安装，无法使用S3功能")
-        
-        # 安装环境
-        env_full_path = env_config.get_full_env_path()
-        if not env_full_path.exists():
-            logger.info(f"开始创建虚拟环境：{env_key}")
-            env_config.install_env()
-        else:
-            logger.info(f"虚拟环境已存在：{env_key}")
-        
-        # 加入缓存
-        self.env_cache[env_key] = env_full_path
 
     def execute_operator(self, operator: OperatorConfig, node_id: str) -> int:
         """
@@ -162,6 +94,11 @@ class PipelineExecutor:
         :return: exit_code
         """
         logger.info(f"开始执行算子：{operator.operator_id}")
+        
+        # 准备路径
+        input_root = str(self.config.work_dir / "input" / operator.operator_id)
+        output_root = str(self.config.work_dir / "workspace" / operator.operator_id)
+        workspace_root = str(self.config.work_dir / "workspace" / self.config.pipeline_id / node_id / operator.operator_id)
         
         # 准备环境变量
         env_vars = os.environ.copy()
@@ -173,86 +110,40 @@ class PipelineExecutor:
             "PIPELINE_ID": self.config.pipeline_id,
             "NODE_ID": node_id,
             "OPERATOR_ID": operator.operator_id,
-            "WORK_DIR": str(self.config.work_dir)
+            "INPUT_ROOT": input_root,
+            "OUTPUT_ROOT": output_root,
+            "WORKSPACE_ROOT": workspace_root,
         })
         
-        # 执行命令
-        try:
-            process = subprocess.Popen(
-                operator.start_command,
-                shell=True,
-                cwd=str(operator.code_path),
-                env=env_vars,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-            
-            # 启动资源监控
-            monitor = ResourceMonitor(process.pid)
-            start_time = time.time()
-            
-            # 等待执行完成或超时
-            while True:
-                # 检查进程是否结束
-                retcode = process.poll()
-                if retcode is not None:
-                    # 进程已结束
-                    break
-                
-                # 检查超时
-                elapsed_time = time.time() - start_time
-                if elapsed_time > operator.timeout:
-                    logger.error(f"算子执行超时（{operator.timeout}秒），强制终止")
-                    process.send_signal(signal.SIGTERM)
-                    time.sleep(5)
-                    if process.poll() is None:
-                        process.kill()
-                    return 4  # 资源异常
-                
-                # 记录资源使用
-                monitor.log_resource_usage(
-                    self.config.pipeline_id, node_id, operator.operator_id
-                )
-                
-                # 读取输出
-                line = process.stdout.readline()
-                if line:
-                    logger.info(f"[{operator.operator_id}] {line.strip()}")
-                
-                time.sleep(monitor.monitor_interval)
-            
-            # 读取剩余输出
-            for line in process.stdout:
-                logger.info(f"[{operator.operator_id}] {line.strip()}")
-            
-            exit_code = process.returncode
-            logger.info(f"算子执行完成：{operator.operator_id}，exit_code={exit_code}")
-            return exit_code
-            
-        except Exception as e:
-            logger.error(f"算子执行失败：{operator.operator_id}，错误：{e}")
-            return 3  # 执行逻辑错误
+        # 构建完整命令（包含环境激活命令）
+        env_cmd = operator.env_config.activate_env_cmd()
+        full_command = " ".join(env_cmd + [operator.start_command]) if env_cmd else operator.start_command
+        
+        # 执行命令并实时输出
+        def log_output(line: str):
+            logger.info(f"[{operator.operator_id}] {line}")
+        
+        exit_code = run_cmd_stream(
+            command=full_command,
+            cwd=operator.code_path,
+            env=env_vars,
+            timeout=operator.timeout,
+            shell=True,
+            on_output=log_output
+        )
+        
+        logger.info(f"算子执行完成：{operator.operator_id}，exit_code={exit_code}")
+        return exit_code
 
     def run(self) -> int:
         """
-        运行产线
+        运行产线（仅执行阶段，不包含初始化）
         :return: 整体exit_code
         """
         try:
-            # 1. 验证依赖关系
-            self.validate_dependencies()
+            logger.info("开始执行产线")
             
-            # 2. 克隆算子代码
-            for operator in self.config.operators:
-                code_path = self.clone_operator_code(operator)
-                operator.code_path = code_path
-            
-            # 3. 设置虚拟环境
-            for operator in self.config.operators:
-                self.setup_virtual_env(operator)
-            
-            # 4. 按节点执行算子
+            # 按节点执行算子
             for node in self.config.nodes:
                 logger.info(f"开始执行节点：{node.node_id}")
                 
@@ -260,6 +151,10 @@ class PipelineExecutor:
                     operator = self.operator_map.get(operator_id)
                     if not operator:
                         logger.error(f"节点 {node.node_id} 中的算子 {operator_id} 不存在")
+                        return 1
+                    
+                    if not operator.code_path:
+                        logger.error(f"算子 {operator_id} 代码路径未设置，请先运行项目初始化")
                         return 1
                     
                     exit_code = self.execute_operator(operator, node.node_id)

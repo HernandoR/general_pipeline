@@ -1,4 +1,5 @@
 """命令行接口"""
+import os
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from omegaconf import OmegaConf
 from pydantic import ValidationError
 
 from general_pipeline.core.pipeline_executor import PipelineExecutor
+from general_pipeline.core.project_initiator import ProjectInitiator
 from general_pipeline.models.pipeline_config import PipelineConfig
 from general_pipeline.utils.codec import Base64Codec
 from general_pipeline.utils.log_utils import get_logger
@@ -59,8 +61,8 @@ def validate_cmd(conf: str):
         pipeline_config = PipelineConfig(**config_dict)
         
         # 验证依赖关系
-        executor = PipelineExecutor(pipeline_config)
-        executor.validate_dependencies()
+        initiator = ProjectInitiator(pipeline_config)
+        initiator.validate_dependencies()
         
         click.echo(f"✅ 配置验证通过：{config_path}")
         click.echo(f"   产线ID: {pipeline_config.pipeline_id}")
@@ -81,9 +83,50 @@ def validate_cmd(conf: str):
         sys.exit(1)
 
 
+@cli.command("init")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径")
+@click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
+@click.option("--operators-dir", "-o", default="operators", help="算子代码目录名（默认：operators）")
+def init(conf: str, project_root: str = None, operators_dir: str = "operators"):
+    """初始化项目（验证配置、克隆代码、创建环境）"""
+    config_path = Path(conf)
+    
+    if not config_path.exists():
+        click.echo(f"❌ 配置文件不存在：{config_path}", err=True)
+        sys.exit(1)
+    
+    try:
+        # 加载配置
+        click.echo(f"正在加载配置文件：{config_path}")
+        omega_conf = OmegaConf.load(config_path)
+        
+        # 转换为字典
+        config_dict = OmegaConf.to_container(omega_conf, resolve=True)
+        
+        # 创建配置对象
+        pipeline_config = PipelineConfig(**config_dict)
+        
+        # 创建初始化器并初始化
+        click.echo(f"开始初始化项目：{pipeline_config.pipeline_id}")
+        root_path = Path(project_root) if project_root else None
+        initiator = ProjectInitiator(pipeline_config, project_root=root_path, operators_dir=operators_dir)
+        initiator.initialize_all()
+        
+        click.echo(f"✅ 项目初始化完成")
+        sys.exit(0)
+        
+    except Exception as e:
+        click.echo(f"❌ 项目初始化失败：{e}", err=True)
+        logger.error(f"项目初始化异常", exc_info=True)
+        sys.exit(1)
+
+
 @cli.command("run")
 @click.option("--conf", "-c", required=True, help="产线配置文件路径")
-def run(conf: str):
+@click.option("--skip-init", is_flag=True, help="跳过初始化步骤（假设已经初始化）")
+@click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
+@click.option("--operators-dir", "-o", default="operators", help="算子代码目录名（默认：operators）")
+def run(conf: str, skip_init: bool = False, project_root: str = None, operators_dir: str = "operators"):
     """运行产线"""
     config_path = Path(conf)
     
@@ -97,9 +140,6 @@ def run(conf: str):
         omega_conf = OmegaConf.load(config_path)
         
         # 处理环境变量覆盖
-        env_override = OmegaConf.from_dotlist([])
-        # 可以从环境变量 PIPELINE_CONF_OVERRIDE 读取覆盖项
-        import os
         override_str = os.environ.get("PIPELINE_CONF_OVERRIDE", "")
         if override_str:
             override_pairs = [pair.strip() for pair in override_str.split(",") if pair.strip()]
@@ -111,6 +151,14 @@ def run(conf: str):
         
         # 创建配置对象
         pipeline_config = PipelineConfig(**config_dict)
+        
+        # 如果不跳过初始化，先执行初始化
+        if not skip_init:
+            click.echo(f"开始项目初始化：{pipeline_config.pipeline_id}")
+            root_path = Path(project_root) if project_root else None
+            initiator = ProjectInitiator(pipeline_config, project_root=root_path, operators_dir=operators_dir)
+            initiator.initialize_all()
+            click.echo(f"✅ 项目初始化完成")
         
         # 创建执行器并运行
         click.echo(f"开始运行产线：{pipeline_config.pipeline_id}")

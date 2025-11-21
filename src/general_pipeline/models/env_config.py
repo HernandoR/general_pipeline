@@ -36,12 +36,23 @@ class BaseVirtualEnvConfig(BaseModel, ABC):
         pass
 
     @abstractmethod
-    def activate_env(self) -> Dict[str, str]:
+    def activate_env_cmd(self) -> List[str]:
         """
-        抽象方法：生成虚拟环境激活命令对应的环境变量（如PATH、CONDA_DEFAULT_ENV等）
-        返回值：环境变量字典，供Operator执行时注入
+        抽象方法：生成虚拟环境激活命令列表，用于拼接到运行命令前
+        返回值：命令列表，如 ['source', '/path/to/activate'] 或 ['conda', 'run', '-p', '/path/to/env']
         """
         pass
+
+    def activate_env(self) -> Dict[str, str]:
+        """
+        生成虚拟环境激活对应的环境变量（如PATH、CONDA_DEFAULT_ENV等）
+        返回值：环境变量字典，供Operator执行时注入
+        """
+        env_path = self.get_full_env_path() / "bin"
+        return {
+            "PATH": f"{str(env_path)}:{os.environ.get('PATH', '')}",
+            "VIRTUAL_ENV": str(self.get_full_env_path())
+        }
 
     def get_full_env_path(self) -> Path:
         """获取虚拟环境的完整路径（env_root_path + env_name），需先注入env_root_path"""
@@ -107,6 +118,11 @@ class UVVirtualEnvConfig(BaseVirtualEnvConfig):
                 )
         logger.info(f"UV虚拟环境安装完成：{self.get_full_env_path()}")
 
+    def activate_env_cmd(self) -> List[str]:
+        """实现UV环境激活命令"""
+        # UV环境通过修改PATH环境变量激活，不需要额外的激活命令
+        return []
+
     def activate_env(self) -> Dict[str, str]:
         """实现UV环境激活：返回包含PATH的环境变量字典"""
         env_path = self.get_full_env_path() / "bin"
@@ -163,6 +179,11 @@ class PixiVirtualEnvConfig(BaseVirtualEnvConfig):
                 f"stderr: {result.stderr}"
             )
         logger.info(f"Pixi虚拟环境安装完成：{self.get_full_env_path()}")
+
+    def activate_env_cmd(self) -> List[str]:
+        """实现Pixi环境激活命令"""
+        # Pixi环境使用 pixi run 来执行命令
+        return ["pixi", "run", "-p", str(self.get_full_env_path()), "--"]
 
     def activate_env(self) -> Dict[str, str]:
         """实现Pixi环境激活：返回包含PATH、CONDA_DEFAULT_ENV的环境变量字典"""
@@ -239,6 +260,11 @@ class CondaVirtualEnvConfig(BaseVirtualEnvConfig):
                     logger.info(f"Conda env update完成（{self.env_name}）")
 
         logger.info(f"Conda虚拟环境安装完成：{self.get_full_env_path()}")
+
+    def activate_env_cmd(self) -> List[str]:
+        """实现Conda环境激活命令"""
+        # Conda环境使用 conda run 来执行命令
+        return ["conda", "run", "-p", str(self.get_full_env_path()), "--no-capture-output", "--"]
 
     def activate_env(self) -> Dict[str, str]:
         """实现Conda环境激活：返回标准conda激活后的环境变量字典"""
