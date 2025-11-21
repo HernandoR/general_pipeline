@@ -31,10 +31,12 @@ class ProjectInitiator:
         # 确定项目根目录
         if project_root is None:
             try:
-                self.project_root = rootutils.find_root(search_from=__file__, indicator=".git")
-            except Exception:
-                self.project_root = Path.cwd()
-                logger.warning(f"未找到项目根目录，使用当前目录：{self.project_root}")
+                self.project_root = rootutils.find_root(search_from=__file__, indicator=".project_root")
+            except Exception as e:
+                raise FileNotFoundError(
+                    "未找到项目根目录标记文件 '.project_root'。"
+                    "请在项目根目录创建一个空的 .project_root 文件，或通过 --project-root 参数指定项目根目录。"
+                ) from e
         else:
             self.project_root = Path(project_root)
         
@@ -109,22 +111,25 @@ class ProjectInitiator:
         if hasattr(env_config, "operator_code_path"):
             env_config.operator_code_path = operator.code_path
         
-        # 注入S3客户端（如果是Conda环境）
-        if hasattr(env_config, "s3_client") and self.config.s3_config:
-            try:
-                s3_path_info = env_config.s3_compress_path.replace("s3://", "").split("/", 1)
-                bucket_name = s3_path_info[0] if s3_path_info else "default"
-                
-                s3_client = get_or_create_s3_client(
-                    bucket_name=bucket_name,
-                    endpoint=self.config.s3_config.endpoint,
-                    access_key=self.config.s3_config.access_key,
-                    secret_key=self.config.s3_config.secret_key,
-                    region=self.config.s3_config.region
-                )
-                env_config.s3_client = s3_client
-            except ImportError as e:
-                logger.warning(f"S3功能不可用: {e}")
+        # 如果有S3配置，注册S3客户端（不直接注入到env_config）
+        if self.config.s3_config:
+            # 注册所有可能的S3客户端
+            # Conda环境会通过s3_utils自动查找
+            if hasattr(env_config, "s3_compress_path"):
+                try:
+                    s3_path_info = env_config.s3_compress_path.replace("s3://", "").split("/", 1)
+                    bucket_name = s3_path_info[0] if s3_path_info else "default"
+                    
+                    get_or_create_s3_client(
+                        bucket_name=bucket_name,
+                        endpoint=self.config.s3_config.endpoint,
+                        access_key=self.config.s3_config.access_key,
+                        secret_key=self.config.s3_config.secret_key,
+                        region=self.config.s3_config.region
+                    )
+                except Exception as e:
+                    logger.warning(f"S3客户端注册失败: {e}")
+
         
         # 安装环境
         env_full_path = env_config.get_full_env_path()

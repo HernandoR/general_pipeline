@@ -3,14 +3,13 @@ import os
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 from general_pipeline.utils.exceptions import EnvInstallError
 from general_pipeline.utils.log_utils import get_logger
 from general_pipeline.utils.path_utils import ensure_dir_exists
-from general_pipeline.utils.s3_utils import parse_s3_path
 
 logger = get_logger()
 
@@ -199,33 +198,24 @@ class PixiVirtualEnvConfig(BaseVirtualEnvConfig):
 class CondaVirtualEnvConfig(BaseVirtualEnvConfig):
     """Conda虚拟环境配置模型（对应conda_project类型）"""
     # Conda项目必需：S3上的zstd压缩包路径
-    s3_compress_path: str = Field(..., description="S3上conda环境zstd压缩包路径（如s3://conda-envs/env-v1.zst）")
+    s3_compress_path: str = Field(..., description="S3上conda环境zstd压缩包路径（格式：bucket_name/key/path）")
     # 可选：解压后是否执行conda env update（用于修复环境路径）
     need_conda_update: bool = Field(default=True, description="解压后是否执行conda env update修复路径")
     # 可选：zstd解压额外参数
     zstd_extra_args: Optional[List[str]] = Field(default=None, description="zstd解压额外参数")
-    # S3客户端（需要注入）
-    s3_client: Optional[Any] = Field(default=None, exclude=True)
 
     def install_env(self) -> None:
         """实现Conda环境安装：从S3下载压缩包 + zstd解压 + 可选conda env update"""
         logger.info(f"开始安装Conda虚拟环境：{self.get_full_env_path()}")
         ensure_dir_exists(self.env_root_path)
 
-        if not self.s3_client:
-            logger.warning("S3客户端未配置，跳过S3下载步骤")
-            return
-
-        # 1. 从S3下载压缩包到临时目录
+        # 1. 从S3下载压缩包到临时目录（使用s3_utils的通用方法）
+        from general_pipeline.utils.s3_utils import download_from_s3
+        
         temp_compress_path = self.env_root_path / f"{self.env_name}.zst"
         try:
             logger.info(f"从S3下载conda压缩包：{self.s3_compress_path} -> {temp_compress_path}")
-            s3_info = parse_s3_path(self.s3_compress_path)
-            self.s3_client.download_file(
-                Bucket=s3_info["bucket"],
-                Key=s3_info["key"],
-                Filename=str(temp_compress_path)
-            )
+            download_from_s3(self.s3_compress_path, temp_compress_path)
         except Exception as e:
             raise EnvInstallError(f"S3下载conda压缩包失败：{str(e)}") from e
 

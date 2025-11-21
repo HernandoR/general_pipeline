@@ -4,13 +4,14 @@ import sys
 from pathlib import Path
 
 import click
-from omegaconf import OmegaConf
+import toml
 from pydantic import ValidationError
 
 from general_pipeline.core.pipeline_executor import PipelineExecutor
 from general_pipeline.core.project_initiator import ProjectInitiator
 from general_pipeline.models.pipeline_config import PipelineConfig
 from general_pipeline.utils.codec import Base64Codec
+from general_pipeline.utils.config_loader import HierarchicalConfigLoader
 from general_pipeline.utils.log_utils import get_logger
 
 logger = get_logger()
@@ -39,8 +40,9 @@ def decode(encoded_str: str):
 
 
 @cli.command("validate")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径")
-def validate_cmd(conf: str):
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（TOML格式）")
+@click.option("--config-root", help="配置根目录（用于层级化加载）")
+def validate_cmd(conf: str, config_root: str = None):
     """校验产线配置文件"""
     config_path = Path(conf)
     
@@ -51,10 +53,15 @@ def validate_cmd(conf: str):
     try:
         # 加载配置
         click.echo(f"正在加载配置文件：{config_path}")
-        omega_conf = OmegaConf.load(config_path)
         
-        # 转换为字典
-        config_dict = OmegaConf.to_container(omega_conf, resolve=True)
+        # 如果指定了配置根目录，使用层级化加载
+        if config_root:
+            loader = HierarchicalConfigLoader(Path(config_root))
+            config_dict = loader.load_and_integrate(config_path)
+        else:
+            # 直接加载TOML文件
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_dict = toml.load(f)
         
         # 验证配置
         click.echo("正在验证配置...")
@@ -84,10 +91,11 @@ def validate_cmd(conf: str):
 
 
 @cli.command("init")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（TOML格式）")
+@click.option("--config-root", help="配置根目录（用于层级化加载）")
 @click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
 @click.option("--operators-dir", "-o", default="operators", help="算子代码目录名（默认：operators）")
-def init(conf: str, project_root: str = None, operators_dir: str = "operators"):
+def init(conf: str, config_root: str = None, project_root: str = None, operators_dir: str = "operators"):
     """初始化项目（验证配置、克隆代码、创建环境）"""
     config_path = Path(conf)
     
@@ -98,10 +106,18 @@ def init(conf: str, project_root: str = None, operators_dir: str = "operators"):
     try:
         # 加载配置
         click.echo(f"正在加载配置文件：{config_path}")
-        omega_conf = OmegaConf.load(config_path)
         
-        # 转换为字典
-        config_dict = OmegaConf.to_container(omega_conf, resolve=True)
+        # 如果指定了配置根目录，使用层级化加载并导出集成配置
+        if config_root:
+            loader = HierarchicalConfigLoader(Path(config_root))
+            config_dict = loader.load_and_integrate(config_path)
+            # 导出集成配置
+            integrated_file = loader.dump_integrated_config(config_dict)
+            click.echo(f"集成配置已保存到：{integrated_file}")
+        else:
+            # 直接加载TOML文件
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_dict = toml.load(f)
         
         # 创建配置对象
         pipeline_config = PipelineConfig(**config_dict)
@@ -122,11 +138,15 @@ def init(conf: str, project_root: str = None, operators_dir: str = "operators"):
 
 
 @cli.command("run")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（TOML格式）")
+@click.option("--config-root", help="配置根目录（用于层级化加载）")
 @click.option("--skip-init", is_flag=True, help="跳过初始化步骤（假设已经初始化）")
 @click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
 @click.option("--operators-dir", "-o", default="operators", help="算子代码目录名（默认：operators）")
-def run(conf: str, skip_init: bool = False, project_root: str = None, operators_dir: str = "operators"):
+@click.option("--node", "-n", help="只运行指定节点")
+@click.option("--operator", "-op", help="只运行指定算子")
+def run(conf: str, config_root: str = None, skip_init: bool = False, project_root: str = None, 
+        operators_dir: str = "operators", node: str = None, operator: str = None):
     """运行产线"""
     config_path = Path(conf)
     
@@ -137,18 +157,15 @@ def run(conf: str, skip_init: bool = False, project_root: str = None, operators_
     try:
         # 加载配置
         click.echo(f"正在加载配置文件：{config_path}")
-        omega_conf = OmegaConf.load(config_path)
         
-        # 处理环境变量覆盖
-        override_str = os.environ.get("PIPELINE_CONF_OVERRIDE", "")
-        if override_str:
-            override_pairs = [pair.strip() for pair in override_str.split(",") if pair.strip()]
-            env_override = OmegaConf.from_dotlist(override_pairs)
-            omega_conf = OmegaConf.merge(omega_conf, env_override)
-        
-        # 转换为字典
-        config_dict = OmegaConf.to_container(omega_conf, resolve=True)
-        
+        # 如果指定了配置根目录，使用层级化加载
+        if config_root:
+            loader = HierarchicalConfigLoader(Path(config_root))
+            config_dict = loader.load_and_integrate(config_path)
+        else:
+            # 直接加载TOML文件
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_dict = toml.load(f)
         # 创建配置对象
         pipeline_config = PipelineConfig(**config_dict)
         
@@ -162,8 +179,13 @@ def run(conf: str, skip_init: bool = False, project_root: str = None, operators_
         
         # 创建执行器并运行
         click.echo(f"开始运行产线：{pipeline_config.pipeline_id}")
+        if operator:
+            click.echo(f"  目标算子：{operator}")
+        elif node:
+            click.echo(f"  目标节点：{node}")
+        
         executor = PipelineExecutor(pipeline_config)
-        exit_code = executor.run()
+        exit_code = executor.run(target_node=node, target_operator=operator)
         
         if exit_code == 0:
             click.echo(f"✅ 产线执行成功")

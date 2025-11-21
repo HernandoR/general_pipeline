@@ -1,6 +1,6 @@
 """产线执行器"""
 import os
-from typing import Dict
+from typing import Dict, Optional
 
 from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.models.pipeline_config import PipelineConfig
@@ -135,16 +135,55 @@ class PipelineExecutor:
         logger.info(f"算子执行完成：{operator.operator_id}，exit_code={exit_code}")
         return exit_code
 
-    def run(self) -> int:
+    def run(self, target_node: Optional[str] = None, target_operator: Optional[str] = None) -> int:
         """
         运行产线（仅执行阶段，不包含初始化）
+        
+        :param target_node: 目标节点ID（可选），如果指定则只运行该节点
+        :param target_operator: 目标算子ID（可选），如果指定则只运行该算子
         :return: 整体exit_code
         """
         try:
             logger.info("开始执行产线")
             
+            # 如果指定了目标算子，直接执行该算子
+            if target_operator:
+                logger.info(f"执行单个算子模式：{target_operator}")
+                operator = self.operator_map.get(target_operator)
+                if not operator:
+                    logger.error(f"算子 {target_operator} 不存在")
+                    return 1
+                
+                if not operator.code_path:
+                    logger.error(f"算子 {target_operator} 代码路径未设置，请先运行项目初始化")
+                    return 1
+                
+                # 查找算子所属的节点
+                node_id = None
+                for node in self.config.nodes:
+                    if target_operator in node.operator_ids:
+                        node_id = node.node_id
+                        break
+                
+                if not node_id:
+                    logger.warning(f"未找到算子 {target_operator} 所属的节点，使用默认节点ID")
+                    node_id = "default_node"
+                
+                exit_code = self.execute_operator(operator, node_id)
+                logger.info(f"算子执行完成：exit_code={exit_code}")
+                return exit_code
+            
+            # 过滤要执行的节点
+            nodes_to_run = self.config.nodes
+            if target_node:
+                logger.info(f"执行单个节点模式：{target_node}")
+                nodes_to_run = [n for n in self.config.nodes if n.node_id == target_node]
+                if not nodes_to_run:
+                    logger.error(f"节点 {target_node} 不存在")
+                    return 1
+            
             # 按节点执行算子
-            for node in self.config.nodes:
+            for node in nodes_to_run:
                 logger.info(f"开始执行节点：{node.node_id}")
                 
                 for operator_id in node.operator_ids:
