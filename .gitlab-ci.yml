@@ -1,0 +1,43 @@
+# GitLab CI configuration for building and deploying documentation
+# This file should be named .gitlab-ci.yml in the root of your repository
+
+stages:
+  - build
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+build-docs:
+  stage: build
+  image: python:3.11
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -e .
+    - pip install sphinx sphinx-rtd-theme myst-parser
+    - cd docs
+    - make html
+  artifacts:
+    paths:
+      - docs/build/html
+    expire_in: 1 week
+  only:
+    - main
+    - merge_requests
+
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - mv docs/build/html public
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+  needs:
+    - build-docs

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import click
-import toml
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 
@@ -41,7 +40,7 @@ def decode(encoded_str: str):
 
 
 @cli.command("validate")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径（支持YAML/TOML格式）")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（YAML格式）")
 @click.option("--config-root", help="配置根目录（用于层级化加载）")
 def validate_cmd(conf: str, config_root: str = None):
     """校验产线配置文件"""
@@ -60,13 +59,8 @@ def validate_cmd(conf: str, config_root: str = None):
             loader = HierarchicalConfigLoader(Path(config_root))
             config_dict = loader.load_and_integrate(config_path)
         else:
-            # 直接加载配置文件，支持TOML和YAML
-            if config_path.suffix.lower() == '.toml':
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config_dict = toml.load(f)
-                config = OmegaConf.create(config_dict)
-            else:
-                config = OmegaConf.load(config_path)
+            # 直接加载YAML配置文件
+            config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 验证配置
@@ -97,7 +91,7 @@ def validate_cmd(conf: str, config_root: str = None):
 
 
 @cli.command("init")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径（支持YAML/TOML格式）")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（YAML格式）")
 @click.option("--config-root", help="配置根目录（用于层级化加载）")
 @click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
 @click.option("--operators-dir", "-o", default="operators", help="算子代码目录名（默认：operators）")
@@ -121,13 +115,8 @@ def init(conf: str, config_root: str = None, project_root: str = None, operators
             integrated_file = loader.dump_integrated_config(config_dict)
             click.echo(f"集成配置已保存到：{integrated_file}")
         else:
-            # 直接加载配置文件，支持TOML和YAML
-            if config_path.suffix.lower() == '.toml':
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config_dict = toml.load(f)
-                config = OmegaConf.create(config_dict)
-            else:
-                config = OmegaConf.load(config_path)
+            # 直接加载YAML配置文件
+            config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 创建配置对象
@@ -149,7 +138,7 @@ def init(conf: str, config_root: str = None, project_root: str = None, operators
 
 
 @cli.command("run")
-@click.option("--conf", "-c", required=True, help="产线配置文件路径（支持YAML/TOML格式）")
+@click.option("--conf", "-c", required=True, help="产线配置文件路径（YAML格式）")
 @click.option("--config-root", help="配置根目录（用于层级化加载）")
 @click.option("--skip-init", is_flag=True, help="跳过初始化步骤（假设已经初始化）")
 @click.option("--project-root", "-p", help="项目根目录（默认自动查找）")
@@ -174,13 +163,8 @@ def run(conf: str, config_root: str = None, skip_init: bool = False, project_roo
             loader = HierarchicalConfigLoader(Path(config_root))
             config_dict = loader.load_and_integrate(config_path)
         else:
-            # 直接加载配置文件，支持TOML和YAML
-            if config_path.suffix.lower() == '.toml':
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config_dict = toml.load(f)
-                config = OmegaConf.create(config_dict)
-            else:
-                config = OmegaConf.load(config_path)
+            # 直接加载YAML配置文件
+            config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         # 创建配置对象
         pipeline_config = PipelineConfig(**config_dict)
