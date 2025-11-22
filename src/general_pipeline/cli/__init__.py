@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import click
+import toml
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 
@@ -61,7 +62,6 @@ def validate_cmd(conf: str, config_root: str = None):
         else:
             # 直接加载配置文件，支持TOML和YAML
             if config_path.suffix.lower() == '.toml':
-                import toml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     config_dict = toml.load(f)
                 config = OmegaConf.create(config_dict)
@@ -123,7 +123,6 @@ def init(conf: str, config_root: str = None, project_root: str = None, operators
         else:
             # 直接加载配置文件，支持TOML和YAML
             if config_path.suffix.lower() == '.toml':
-                import toml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     config_dict = toml.load(f)
                 config = OmegaConf.create(config_dict)
@@ -177,7 +176,6 @@ def run(conf: str, config_root: str = None, skip_init: bool = False, project_roo
         else:
             # 直接加载配置文件，支持TOML和YAML
             if config_path.suffix.lower() == '.toml':
-                import toml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     config_dict = toml.load(f)
                 config = OmegaConf.create(config_dict)
