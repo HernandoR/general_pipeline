@@ -2,7 +2,7 @@
 import os
 from typing import Dict, Optional
 
-import toml
+from omegaconf import OmegaConf
 
 from general_pipeline.models.operator_config import OperatorConfig
 from general_pipeline.models.pipeline_config import PipelineConfig
@@ -53,10 +53,11 @@ class PipelineExecutor:
                 logger.info(f"从S3加载配置覆盖：{override_s3_path}")
                 # 下载配置文件到内存
                 buffer = download_from_s3(override_s3_path)
-                override_config = toml.loads(buffer.read().decode("utf-8"))
+                override_config = OmegaConf.create(buffer.read().decode("utf-8"))
+                override_dict = OmegaConf.to_container(override_config, resolve=True)
                 
                 # 应用覆盖（简单的字典合并）
-                self._merge_config(self.config.model_dump(), override_config)
+                self._merge_config(self.config.model_dump(), override_dict)
                 logger.info("配置覆盖应用成功")
             except Exception as e:
                 logger.warning(f"应用配置覆盖失败: {e}")

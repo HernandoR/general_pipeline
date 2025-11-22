@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import toml
+from omegaconf import OmegaConf
 
 from general_pipeline.utils.log_utils import get_logger
 
@@ -49,10 +49,9 @@ class HierarchicalConfigLoader:
             raise FileNotFoundError(f"产线配置文件不存在: {pipeline_file}")
         
         logger.info(f"加载产线配置: {pipeline_file}")
-        with open(pipeline_file, "r", encoding="utf-8") as f:
-            config = toml.load(f)
+        config = OmegaConf.load(pipeline_file)
         
-        return config
+        return OmegaConf.to_container(config, resolve=True)
     
     def load_node_config(self, node_id: str, version: str) -> Dict[str, Any]:
         """
@@ -71,14 +70,14 @@ class HierarchicalConfigLoader:
                 raise FileNotFoundError(f"节点配置文件不存在: {node_id}_{version}.toml or {node_id}.toml")
         
         logger.info(f"加载节点配置: {node_file}")
-        with open(node_file, "r", encoding="utf-8") as f:
-            config = toml.load(f)
+        config = OmegaConf.load(node_file)
+        config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 如果配置有嵌套结构（例如 [node_1]），提取内容
-        if node_id in config:
-            return config[node_id]
+        if node_id in config_dict:
+            return config_dict[node_id]
         
-        return config
+        return config_dict
     
     def load_operator_config(self, operator_id: str, version: str) -> Dict[str, Any]:
         """
@@ -97,14 +96,14 @@ class HierarchicalConfigLoader:
                 raise FileNotFoundError(f"算子配置文件不存在: {operator_id}_{version}.toml or {operator_id}.toml")
         
         logger.info(f"加载算子配置: {operator_file}")
-        with open(operator_file, "r", encoding="utf-8") as f:
-            config = toml.load(f)
+        config = OmegaConf.load(operator_file)
+        config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 如果配置有嵌套结构（例如 [example_operator_1]），提取内容
-        if operator_id in config:
-            return config[operator_id]
+        if operator_id in config_dict:
+            return config_dict[operator_id]
         
-        return config
+        return config_dict
     
     def load_and_integrate(self, pipeline_file: Path) -> Dict[str, Any]:
         """
@@ -195,12 +194,12 @@ class HierarchicalConfigLoader:
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             pipeline_id = integrated_config.get("pipeline_id", "pipeline")
-            filename = f"{pipeline_id}_{timestamp}.toml"
+            filename = f"{pipeline_id}_{timestamp}.yaml"
         
         output_file = self.integration_dir / filename
         
         logger.info(f"导出集成配置到: {output_file}")
-        with open(output_file, "w", encoding="utf-8") as f:
-            toml.dump(integrated_config, f)
+        conf = OmegaConf.create(integrated_config)
+        OmegaConf.save(conf, output_file)
         
         return output_file
