@@ -86,7 +86,18 @@ class SingletonMeta(type):
         return cls._instances[key]
 
 
-class BasicRunner(ABC, metaclass=SingletonMeta):
+# 组合ABCMeta和SingletonMeta
+from abc import ABCMeta
+
+
+class SingletonABCMeta(ABCMeta, SingletonMeta):
+    """
+    组合ABCMeta和SingletonMeta的元类
+    """
+    pass
+
+
+class BasicRunner(ABC, metaclass=SingletonABCMeta):
     """
     算子基类，提供标准化路径管理和日志集成
     所有算子必须继承此类并实现 run() 和 build_running_command() 方法

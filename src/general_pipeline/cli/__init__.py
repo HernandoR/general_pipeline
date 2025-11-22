@@ -59,8 +59,14 @@ def validate_cmd(conf: str, config_root: str = None):
             loader = HierarchicalConfigLoader(Path(config_root))
             config_dict = loader.load_and_integrate(config_path)
         else:
-            # 直接加载配置文件
-            config = OmegaConf.load(config_path)
+            # 直接加载配置文件，支持TOML和YAML
+            if config_path.suffix.lower() == '.toml':
+                import toml
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_dict = toml.load(f)
+                config = OmegaConf.create(config_dict)
+            else:
+                config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 验证配置
@@ -115,8 +121,14 @@ def init(conf: str, config_root: str = None, project_root: str = None, operators
             integrated_file = loader.dump_integrated_config(config_dict)
             click.echo(f"集成配置已保存到：{integrated_file}")
         else:
-            # 直接加载配置文件
-            config = OmegaConf.load(config_path)
+            # 直接加载配置文件，支持TOML和YAML
+            if config_path.suffix.lower() == '.toml':
+                import toml
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_dict = toml.load(f)
+                config = OmegaConf.create(config_dict)
+            else:
+                config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 创建配置对象
@@ -163,8 +175,14 @@ def run(conf: str, config_root: str = None, skip_init: bool = False, project_roo
             loader = HierarchicalConfigLoader(Path(config_root))
             config_dict = loader.load_and_integrate(config_path)
         else:
-            # 直接加载配置文件
-            config = OmegaConf.load(config_path)
+            # 直接加载配置文件，支持TOML和YAML
+            if config_path.suffix.lower() == '.toml':
+                import toml
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_dict = toml.load(f)
+                config = OmegaConf.create(config_dict)
+            else:
+                config = OmegaConf.load(config_path)
             config_dict = OmegaConf.to_container(config, resolve=True)
         # 创建配置对象
         pipeline_config = PipelineConfig(**config_dict)

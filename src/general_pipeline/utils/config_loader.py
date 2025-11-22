@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import toml
 from omegaconf import OmegaConf
 
 from general_pipeline.utils.log_utils import get_logger
@@ -49,7 +50,16 @@ class HierarchicalConfigLoader:
             raise FileNotFoundError(f"产线配置文件不存在: {pipeline_file}")
         
         logger.info(f"加载产线配置: {pipeline_file}")
-        config = OmegaConf.load(pipeline_file)
+        
+        # 判断文件类型
+        if pipeline_file.suffix.lower() == '.toml':
+            # TOML文件：先用toml库加载，再转为OmegaConf
+            with open(pipeline_file, 'r', encoding='utf-8') as f:
+                config_dict = toml.load(f)
+            config = OmegaConf.create(config_dict)
+        else:
+            # YAML文件：直接用OmegaConf加载
+            config = OmegaConf.load(pipeline_file)
         
         return OmegaConf.to_container(config, resolve=True)
     
@@ -67,10 +77,23 @@ class HierarchicalConfigLoader:
             # 尝试不带版本的文件名
             node_file = self.nodes_dir / f"{node_id}.toml"
             if not node_file.exists():
-                raise FileNotFoundError(f"节点配置文件不存在: {node_id}_{version}.toml or {node_id}.toml")
+                # 尝试yaml格式
+                node_file = self.nodes_dir / f"{node_id}_{version}.yaml"
+                if not node_file.exists():
+                    node_file = self.nodes_dir / f"{node_id}.yaml"
+                    if not node_file.exists():
+                        raise FileNotFoundError(f"节点配置文件不存在: {node_id}_{version}.toml/yaml or {node_id}.toml/yaml")
         
         logger.info(f"加载节点配置: {node_file}")
-        config = OmegaConf.load(node_file)
+        
+        # 判断文件类型
+        if node_file.suffix.lower() == '.toml':
+            with open(node_file, 'r', encoding='utf-8') as f:
+                config_dict = toml.load(f)
+            config = OmegaConf.create(config_dict)
+        else:
+            config = OmegaConf.load(node_file)
+        
         config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 如果配置有嵌套结构（例如 [node_1]），提取内容
@@ -93,10 +116,23 @@ class HierarchicalConfigLoader:
             # 尝试不带版本的文件名
             operator_file = self.operators_dir / f"{operator_id}.toml"
             if not operator_file.exists():
-                raise FileNotFoundError(f"算子配置文件不存在: {operator_id}_{version}.toml or {operator_id}.toml")
+                # 尝试yaml格式
+                operator_file = self.operators_dir / f"{operator_id}_{version}.yaml"
+                if not operator_file.exists():
+                    operator_file = self.operators_dir / f"{operator_id}.yaml"
+                    if not operator_file.exists():
+                        raise FileNotFoundError(f"算子配置文件不存在: {operator_id}_{version}.toml/yaml or {operator_id}.toml/yaml")
         
         logger.info(f"加载算子配置: {operator_file}")
-        config = OmegaConf.load(operator_file)
+        
+        # 判断文件类型
+        if operator_file.suffix.lower() == '.toml':
+            with open(operator_file, 'r', encoding='utf-8') as f:
+                config_dict = toml.load(f)
+            config = OmegaConf.create(config_dict)
+        else:
+            config = OmegaConf.load(operator_file)
+        
         config_dict = OmegaConf.to_container(config, resolve=True)
         
         # 如果配置有嵌套结构（例如 [example_operator_1]），提取内容
