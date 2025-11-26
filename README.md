@@ -1,6 +1,6 @@
 # General Pipeline - 通用数据产线框架
 
-一套生产级、标准化的数据产线框架，支持层级化TOML配置、多云存储、Docker容器化部署、选择性执行和实时资源监控。
+一套生产级、标准化的数据产线框架，支持层级化配置、多云存储、Docker容器化部署、选择性执行和实时资源监控。
 
 ## ✨ 核心特性
 
@@ -10,7 +10,8 @@
 - **Docker友好**：支持多阶段构建，初始化与运行分离
 
 ### 配置管理
-- **TOML格式**：更强的类型安全性，更清晰的嵌套结构
+- **OmegaConf支持**：使用OmegaConf进行配置管理，支持变量插值和类型安全
+- **多格式支持**：支持YAML和TOML配置文件格式
 - **层级化加载**：Pipeline/Node/Operator分文件管理，支持版本控制
 - **动态覆盖**：从S3加载配置覆盖，支持环境特定配置
 - **Pydantic验证**：强类型校验，早期发现配置错误
@@ -22,9 +23,16 @@
 
 ### 对象存储
 - **多云支持**：AWS S3、火山引擎TOS、金山云KS3、阿里云OSS、腾讯云COS
+- **注册机制**：使用 `@register_s3_config` 装饰器注册S3配置
 - **统一接口**：`provider://bucket/key` 格式，自动路由到正确提供商
-- **安全凭证**：从 `s3_aksk.env` 加载，不暴露在代码中
+- **安全凭证**：支持装饰器注册或从 `s3_aksk.env` 加载，不暴露在代码中
 - **便捷方法**：`download_from_s3()` 和 `upload_to_s3()` 自动管理客户端
+
+### 算子管理
+- **注册机制**：使用 `@register_operator` 装饰器注册算子
+- **单例模式**：自动确保同一operator_id只有一个实例
+- **动态发现**：通过operator_id查找和实例化算子
+- **标准化接口**：所有算子继承 `BasicRunner` 并实现 `run()` 和 `build_running_command()` 方法
 
 ### 执行控制
 - **选择性执行**：运行单个算子、单个节点或全部节点
@@ -165,14 +173,19 @@ pyproject_path = "pyproject.toml"  # UV环境
 
 ## 🛠️ 算子开发
 
-算子需要继承 `BasicRunner` 基类：
+### 基本算子开发
+
+算子需要继承 `BasicRunner` 基类并实现两个必需方法：
 
 ```python
-from general_pipeline.core.basic_runner import BasicRunner
+from general_pipeline.core import BasicRunner, register_operator
+from typing import List
 import os
 
+@register_operator("data_cleaner_v1")  # 注册算子
 class DataCleaner(BasicRunner):
     def run(self) -> int:
+        """执行算子业务逻辑"""
         # 路径由Pipeline注入
         # self.input_root - 输入数据目录
         # self.output_root - 输出数据目录  
@@ -187,6 +200,14 @@ class DataCleaner(BasicRunner):
         self.save_data(cleaned, self.output_root)
         
         return 0  # 返回exit code: 0=成功
+    
+    def build_running_command(self) -> List[str]:
+        """构建运行命令"""
+        return [
+            "python", "main.py",
+            "--input", self.input_root,
+            "--output", self.output_root
+        ]
 
 if __name__ == "__main__":
     cleaner = DataCleaner(
@@ -199,6 +220,68 @@ if __name__ == "__main__":
     )
     exit(cleaner.run())
 ```
+
+### 算子注册与动态发现
+
+使用 `@register_operator` 装饰器注册算子，支持动态查找：
+
+```python
+from general_pipeline.core import get_operator_class, list_registered_operators
+
+# 列出所有已注册的算子
+operators = list_registered_operators()
+print(f"Available operators: {operators}")
+
+# 根据ID获取算子类
+OperatorClass = get_operator_class("data_cleaner_v1")
+if OperatorClass:
+    operator = OperatorClass(
+        pipeline_id="my_pipeline",
+        node_id="node_1",
+        operator_id="data_cleaner_v1",
+        input_root="/data/input",
+        output_root="/data/output",
+        workspace_root="/workspace"
+    )
+    exit_code = operator.run()
+```
+
+**注意**：算子自动使用单例模式，相同的 `operator_id` 只会创建一个实例。
+
+## 🔌 S3配置注册
+
+### 使用装饰器注册S3配置
+
+```python
+from general_pipeline.utils import register_s3_config, download_from_s3, upload_to_s3
+
+# 注册S3配置
+@register_s3_config("tos", "my-bucket")
+def configure_tos():
+    return {
+        "endpoint": "https://tos-cn-beijing.volces.com",
+        "access_key": "your_key",
+        "secret_key": "your_secret",
+        "region": "cn-beijing"
+    }
+
+# 直接使用，无需环境变量
+data = download_from_s3("tos://my-bucket/data/file.csv")
+upload_to_s3(data, "tos://my-bucket/output/result.csv")
+```
+
+### 使用环境变量（向后兼容）
+
+仍然支持通过 `s3_aksk.env` 文件配置：
+
+```bash
+TOS_MY_BUCKET_ENDPOINT=https://tos-cn-beijing.volces.com
+TOS_MY_BUCKET_ACCESS_KEY=your_key
+TOS_MY_BUCKET_SECRET_KEY=your_secret
+TOS_MY_BUCKET_REGION=cn-beijing
+```
+
+配置加载优先级：装饰器注册 > 环境变量
 
 ## 🐳 Docker部署
 
@@ -359,7 +442,9 @@ general_pipeline/
 
 ## 📚 文档
 
-- [TOML迁移指南](TOML_MIGRATION_GUIDE.md) - 从YAML迁移到TOML
+- [OmegaConf迁移指南](OMEGACONF_MIGRATION_GUIDE.md) - 从TOML迁移到OmegaConf，支持YAML和TOML
+- [注册机制指南](REGISTRATION_GUIDE.md) - S3配置注册和算子注册详细说明
+- [TOML迁移指南](TOML_MIGRATION_GUIDE.md) - 旧版TOML迁移指南（已更新为OmegaConf）
 - [实现总结](REVIEW_ROUND_2_SUMMARY.md) - 详细实现说明
 - [架构文档](doc/ai-instructions/) - 详细架构设计
 

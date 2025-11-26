@@ -1,16 +1,110 @@
 """算子基类 BasicRunner"""
 import os
 from abc import ABC, abstractmethod
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from general_pipeline.utils.log_utils import get_logger
 
 logger = get_logger()
 
+# 全局算子注册表 - 按 operator_id 组织
+_operator_registry: Dict[str, Type["BasicRunner"]] = {}
 
-class BasicRunner(ABC):
+
+def register_operator(operator_id: str):
+    """
+    算子注册装饰器
+    用于将算子类与operator_id关联，支持通过operator_id查找算子类
+    
+    :param operator_id: 算子唯一标识
+    
+    使用示例:
+        @register_operator("data_cleaner_v1")
+        class DataCleanerOperator(BasicRunner):
+            def run(self) -> int:
+                # 实现数据清洗逻辑
+                return 0
+            
+            def build_running_command(self) -> List[str]:
+                return ["python", "main.py"]
+    """
+    def decorator(cls: Type["BasicRunner"]) -> Type["BasicRunner"]:
+        if not issubclass(cls, BasicRunner):
+            raise TypeError(f"被装饰的类 {cls.__name__} 必须继承 BasicRunner")
+        
+        if operator_id in _operator_registry:
+            logger.warning(f"算子 {operator_id} 已经注册，将被新的类 {cls.__name__} 覆盖")
+        
+        _operator_registry[operator_id] = cls
+        logger.debug(f"算子 {operator_id} 注册成功: {cls.__name__}")
+        
+        return cls
+    
+    return decorator
+
+
+def get_operator_class(operator_id: str) -> Optional[Type["BasicRunner"]]:
+    """
+    根据operator_id获取算子类
+    
+    :param operator_id: 算子唯一标识
+    :return: 算子类，如果不存在返回None
+    """
+    return _operator_registry.get(operator_id)
+
+
+def list_registered_operators() -> List[str]:
+    """
+    列出所有已注册的算子ID
+    
+    :return: 算子ID列表
+    """
+    return list(_operator_registry.keys())
+
+
+class SingletonMeta(type):
+    """
+    单例元类，确保每个算子类只有一个实例
+    考虑到不同的初始化参数，使用参数组合作为key
+    
+    注意：当前实现不是线程安全的。如果需要在多线程环境中使用，
+    请添加线程锁或使用线程安全的数据结构。
+    """
+    _instances: Dict[tuple, Any] = {}
+    
+    def __call__(cls, *args, **kwargs):
+        # 使用类和关键参数的组合作为key
+        # 对于算子，主要是operator_id应该作为单例的key
+        operator_id = kwargs.get("operator_id") or (args[2] if len(args) > 2 else None)
+        key = (cls, operator_id)
+        
+        if key not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[key] = instance
+            logger.debug(f"创建新的算子实例: {cls.__name__} (operator_id={operator_id})")
+        else:
+            logger.debug(f"返回已存在的算子实例: {cls.__name__} (operator_id={operator_id})")
+        
+        return cls._instances[key]
+
+
+# 组合ABCMeta和SingletonMeta
+from abc import ABCMeta
+
+
+class SingletonABCMeta(ABCMeta, SingletonMeta):
+    """
+    组合ABCMeta和SingletonMeta的元类
+    """
+    pass
+
+
+class BasicRunner(ABC, metaclass=SingletonABCMeta):
     """
     算子基类，提供标准化路径管理和日志集成
-    所有算子必须继承此类并实现 run() 方法
+    所有算子必须继承此类并实现 run() 和 build_running_command() 方法
+    使用单例模式，确保同一个operator_id只有一个实例
     """
 
     def __init__(
@@ -70,6 +164,24 @@ class BasicRunner(ABC):
             5: 环境错误
         """
         raise NotImplementedError("算子需重写 run() 方法并返回exit_code")
+
+    @abstractmethod
+    def build_running_command(self) -> List[str]:
+        """
+        构建运行命令（子类必须重写）
+        返回完整的命令列表，用于执行算子
+        
+        :return: 命令列表，例如 ["python", "main.py", "--input", "/path/to/input"]
+        
+        示例:
+            def build_running_command(self) -> List[str]:
+                return [
+                    "python", "run.py",
+                    "--input", self.input_root,
+                    "--output", self.output_root
+                ]
+        """
+        raise NotImplementedError("算子需重写 build_running_command() 方法并返回命令列表")
 
     def validate_input(self) -> bool:
         """

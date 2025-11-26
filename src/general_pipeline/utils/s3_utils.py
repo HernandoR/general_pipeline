@@ -1,8 +1,9 @@
 """S3 工具模块 - 支持多种云存储提供商"""
 import os
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
@@ -12,6 +13,52 @@ load_dotenv("s3_aksk.env")
 
 # 全局S3客户端池 - 按 provider 和 bucket 组织
 _s3_clients: Dict[str, Dict[str, any]] = {}
+
+# 全局S3配置注册表 - 按 (provider, bucket) 组织
+_s3_config_registry: Dict[tuple[str, str], Dict[str, Any]] = {}
+
+
+def register_s3_config(provider: str, bucket: str):
+    """
+    S3配置注册装饰器
+    用于注册S3配置，支持从配置文件或代码中注册
+    
+    :param provider: 提供商名称 (s3, tos, ks3, oss, cos)
+    :param bucket: 存储桶名称
+    
+    使用示例:
+        @register_s3_config("tos", "my-bucket")
+        def configure_tos_bucket():
+            return {
+                "endpoint": "https://tos-cn-beijing.volces.com",
+                "access_key": "your_key",
+                "secret_key": "your_secret",
+                "region": "cn-beijing"
+            }
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            config = func(*args, **kwargs)
+            _s3_config_registry[(provider, bucket)] = config
+            return config
+        
+        # 立即执行函数以注册配置
+        wrapper()
+        return wrapper
+    
+    return decorator
+
+
+def get_s3_config(provider: str, bucket: str) -> Optional[Dict[str, Any]]:
+    """
+    从注册表获取S3配置
+    
+    :param provider: 提供商名称
+    :param bucket: 存储桶名称
+    :return: S3配置字典，如果不存在返回None
+    """
+    return _s3_config_registry.get((provider, bucket))
 
 
 class S3Path(BaseModel):
@@ -79,7 +126,9 @@ def parse_s3_path(s3_path: str) -> S3Path:
 
 def _load_s3_credentials(provider: str, bucket: str) -> tuple[str, str, str, Optional[str]]:
     """
-    从环境变量加载S3凭证
+    从注册表或环境变量加载S3凭证
+    优先从注册表获取，如果没有则从环境变量获取
+    
     环境变量格式：
     - {PROVIDER}_{BUCKET}_ENDPOINT
     - {PROVIDER}_{BUCKET}_ACCESS_KEY
@@ -90,6 +139,18 @@ def _load_s3_credentials(provider: str, bucket: str) -> tuple[str, str, str, Opt
     :param bucket: 存储桶名称
     :return: (endpoint, access_key, secret_key, region)
     """
+    # 首先尝试从注册表获取
+    config = get_s3_config(provider, bucket)
+    if config:
+        endpoint = config.get("endpoint")
+        access_key = config.get("access_key")
+        secret_key = config.get("secret_key")
+        region = config.get("region")
+        
+        if all([endpoint, access_key, secret_key]):
+            return endpoint, access_key, secret_key, region
+    
+    # 如果注册表中没有，从环境变量获取
     prefix = f"{provider.upper()}_{bucket.upper()}"
     
     endpoint = os.getenv(f"{prefix}_ENDPOINT")
@@ -100,7 +161,7 @@ def _load_s3_credentials(provider: str, bucket: str) -> tuple[str, str, str, Opt
     if not all([endpoint, access_key, secret_key]):
         raise ValueError(
             f"未找到 {provider}://{bucket} 的凭证配置。"
-            f"请在 s3_aksk.env 文件中设置:\n"
+            f"请通过 @register_s3_config 装饰器注册，或在 s3_aksk.env 文件中设置:\n"
             f"  {prefix}_ENDPOINT=<endpoint_url>\n"
             f"  {prefix}_ACCESS_KEY=<access_key>\n"
             f"  {prefix}_SECRET_KEY=<secret_key>\n"

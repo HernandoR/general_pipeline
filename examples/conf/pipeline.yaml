@@ -1,0 +1,17 @@
+pipeline:
+  pipeline_id: example_pipeline_v1
+  name: 示例数据处理产线
+  description: 演示基本的数据处理流程
+  work_dir: ./pipeline_workspace
+  log_config:
+    level: INFO
+    rotation: 10 GB
+    retention: 30
+  nodes:
+    refs:
+    - node_1:v1.0
+    - node_2:v1.0
+  operators:
+    refs:
+    - example_operator_1:v1.0
+    - example_operator_2:v2.0
